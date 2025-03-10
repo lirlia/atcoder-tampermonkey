@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         AtCoder Solved Problem Highlighter (All Contests)
+// @name         AtCoder AC Problem Highlighter
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  AtCoderの問題一覧で正解済みの問題に「✅ 」を表示する (全コンテスト対応)
-// @author       lirlia
+// @version      1.1
+// @description  AtCoderの問題一覧で、ACになった問題に「✅」を表示する
+// @author       You
 // @match        https://atcoder.jp/contests/*/tasks
-// @match        https://atcoder.jp/contests/*/score
+// @match        https://atcoder.jp/contests/*/submissions/me*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addStyle
 // @connect      atcoder.jp
@@ -14,30 +14,43 @@
 (function () {
   'use strict';
 
-  let solvedProblems = new Set();  // 正解済みの問題を格納するセット
-  const contestId = window.location.pathname.split("/")[2]; // 現在のコンテストID
+  let solvedProblems = new Set();
+  const contestId = window.location.pathname.split("/")[2]; // コンテストID
 
-  // 正解済みの問題一覧を取得
-  function fetchSolvedProblems() {
-    fetch(`https://atcoder.jp/contests/${contestId}/score`, { credentials: "include" })
-      .then(response => response.text())
-      .then(html => {
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
+  // 提出ページの全ページからACの問題を取得
+  async function fetchAllSolvedProblems(page = 1) {
+    const url = `https://atcoder.jp/contests/${contestId}/submissions/me?page=${page}`;
+    try {
+      const response = await fetch(url, { credentials: "include" });
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, "text/html");
 
-        // スコアページから正解済みの問題を取得
-        doc.querySelectorAll("td.text-center a[href^='/contests/']").forEach(a => {
-          const taskUrl = a.getAttribute("href");
+      // 提出テーブルのACを取得
+      doc.querySelectorAll("table tbody tr").forEach(row => {
+        const taskLink = row.querySelector("td a[href^='/contests/']");
+        const statusCell = row.querySelector("td.text-center .label-success"); // AC ラベル
+
+        if (taskLink && statusCell) {
+          const taskUrl = taskLink.getAttribute("href");
           solvedProblems.add(taskUrl);
-        });
+        }
+      });
 
-        console.log("[Tampermonkey] Solved problems:", solvedProblems);
-        highlightSolvedProblems();
-      })
-      .catch(error => console.error("Failed to fetch solved problems:", error));
+      // 次のページがある場合は再帰的に取得
+      const nextPageLink = doc.querySelector("ul.pager li a[href*='?page=']");
+      if (nextPageLink && !nextPageLink.closest("li").classList.contains("disabled")) {
+        const nextPageNumber = parseInt(new URL(nextPageLink.href).searchParams.get("page"), 10);
+        if (!isNaN(nextPageNumber)) {
+          await fetchAllSolvedProblems(nextPageNumber);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to fetch AC problems:", error);
+    }
   }
 
-  // 問題一覧ページで、正解済みの問題に「✅ 」を追加
+  // 問題一覧ページで、ACの問題に「✅」を追加
   function highlightSolvedProblems() {
     document.querySelectorAll("table tbody tr td:first-child a[href^='/contests/']").forEach(a => {
       const taskUrl = a.getAttribute("href");
@@ -45,8 +58,6 @@
         a.classList.add("solved-highlight");
         const badge = document.createElement("span");
         badge.textContent = "✅ ";
-        badge.style.color = "red";
-        badge.style.fontWeight = "bold";
         a.prepend(badge);
       }
     });
@@ -54,32 +65,34 @@
 
   // CSS を追加
   GM_addStyle(`
-      .solved-highlight {
-          font-weight: bold;
-      }
+      .solved-highlight {}
   `);
 
-  // **スコアページで正解済みの問題を取得**
-  if (window.location.pathname.includes("/score")) {
-    fetchSolvedProblems();
+  // **提出ページでACの問題を取得**
+  if (window.location.pathname.includes("/submissions/me")) {
+    fetchAllSolvedProblems().then(() => {
+      console.log("[Tampermonkey] Solved AC problems:", solvedProblems);
+    });
   }
 
-  // **問題一覧ページで正解済みの問題をハイライト**
+  // **問題一覧ページでACの問題をハイライト**
   if (window.location.pathname.includes("/tasks")) {
-    fetchSolvedProblems(); // 初回取得
-    setTimeout(highlightSolvedProblems, 2000); // 遅延実行で対策
+    fetchAllSolvedProblems().then(() => {
+      highlightSolvedProblems();
+      setTimeout(highlightSolvedProblems, 2000); // 遅延実行で対策
 
-    // **MutationObserverでDOMの変更を監視**
-    const observer = new MutationObserver(highlightSolvedProblems);
-    observer.observe(document.body, { childList: true, subtree: true });
+      // **MutationObserverでDOMの変更を監視**
+      const observer = new MutationObserver(highlightSolvedProblems);
+      observer.observe(document.body, { childList: true, subtree: true });
 
-    // **SPA対策: pushStateをフック**
-    (function (history) {
-      const pushState = history.pushState;
-      history.pushState = function () {
-        setTimeout(highlightSolvedProblems, 1000);
-        return pushState.apply(history, arguments);
-      };
-    })(window.history);
+      // **SPA対策: pushStateをフック**
+      (function (history) {
+        const pushState = history.pushState;
+        history.pushState = function () {
+          setTimeout(highlightSolvedProblems, 1000);
+          return pushState.apply(history, arguments);
+        };
+      })(window.history);
+    });
   }
 })();
