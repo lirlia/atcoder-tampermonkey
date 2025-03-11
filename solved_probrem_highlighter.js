@@ -19,7 +19,7 @@
 
   // 提出ページの全ページからACの問題を取得
   async function fetchAllSolvedProblems(page = 1) {
-    const url = `https://atcoder.jp/contests/${contestId}/submissions/me?page=${page}`;
+    const url = `https://atcoder.jp/contests/${contestId}/submissions/me?f.LanguageName=&f.Status=AC&f.Task=&f.User=&page=${page}`;
     try {
       const response = await fetch(url, { credentials: "include" });
       const html = await response.text();
@@ -38,7 +38,9 @@
       });
 
       // 次のページがある場合は再帰的に取得
-      const nextPageLink = doc.querySelector("ul.pager li a[href*='?page=']");
+      const pagerLinks = doc.querySelectorAll("ul.pager li a");
+      const nextPageLink = pagerLinks.length > 1 ? pagerLinks[1] : null;
+
       if (nextPageLink && !nextPageLink.closest("li").classList.contains("disabled")) {
         const nextPageNumber = parseInt(new URL(nextPageLink.href).searchParams.get("page"), 10);
         if (!isNaN(nextPageNumber)) {
